@@ -2,7 +2,7 @@
 
 Цель работы — настроить CI для Node.js-приложения, проверить его на трёх версиях Node.js и собрать Docker-образ. Функция `add(a, b)` возвращает сумму двух чисел. При запуске из командной строки приложение выводит `Hello from Node.js app!`. [Методичка преподавателя](https://github.com/rurewa/imfua/blob/main/content/DevOps/CI_CD/Pipelines/NodeJS.md)
 
-Локальные проверки выполнены. Первый запуск GitHub Actions запланирован после публикации проекта.
+CI успешно прошёл на GitHub Actions. Docker-образ из первого запуска восстановлен и проверен локально.
 
 ## Структура проекта
 
@@ -15,7 +15,7 @@
 | `.eslintrc.json` | Правила ESLint из методички. |
 | `Dockerfile`, `.dockerignore` | Сборка на официальном `node:18-alpine` и состав контекста. |
 | `.gitignore` | Исключения для зависимостей, отчётов, файлов окружения и локальных архивов. |
-| `screenshots/` | Настоящие снимки локальных проверок. |
+| `screenshots/` | Снимки локальных проверок, GitHub Actions и восстановления образа. |
 
 ## Как работает CI
 
@@ -66,7 +66,7 @@ docker run --rm --network none my-node-app:latest
 - `npm start` и контейнерный запуск вывели ожидаемое приветствие. Сборка включила lock-файл, ESLint и Jest в рабочем образе отсутствуют.
 - `actionlint` 1.7.12 проверил YAML без ошибок. `docker save` создал пробный TAR с тегом `my-node-app:test`.
 
-## Скриншоты
+## Скриншоты локальных проверок
 
 ### Установка зависимостей
 
@@ -88,13 +88,60 @@ docker run --rm --network none my-node-app:latest
 
 ![Контейнер вывел Hello from Node.js app! и завершился с кодом 0](screenshots/05-docker-run.png)
 
-## Первый запуск на GitHub
+## Результаты GitHub Actions и Docker-артефакта
 
-После согласования публикации поместите содержимое проекта в корень репозитория `my-node-app` вместе с `.github/workflows/ci.yml` и отправьте ветку `main`. На вкладке **Actions** откройте **CI for Node.js App**. Проверьте три варианта **Lint & Test** и результат **Build Docker Image (no push)**.
+Первый запуск для коммита `b4b6fbf` в ветке `main` завершился со статусом **Success**. [Запуск CI № 1](https://github.com/aleks-maker-maker/my-node-app/actions/runs/44544869191)
 
-После успешного запуска скачайте **my-node-app-image** из раздела **Artifacts**, распакуйте ZIP и выполните команды из каталога с TAR.
+| Node.js | `npm ci` | ESLint | Jest |
+| --- | --- | --- | --- |
+| [18.x](https://github.com/aleks-maker-maker/my-node-app/actions/runs/44544869191/job/135632622997) | Успешно | Успешно | 3 из 3 |
+| [20.x](https://github.com/aleks-maker-maker/my-node-app/actions/runs/44544869191/job/135632623804) | Успешно | Успешно | 3 из 3 |
+| [22.x](https://github.com/aleks-maker-maker/my-node-app/actions/runs/44544869191/job/135632623678) | Успешно | Успешно | 3 из 3 |
+
+После успешной матрицы Docker-задание собрало образ `my-node-app:test`, сохранило его в `my-node-app.tar` и загрузило ZIP в GitHub Actions. [Задание Build Docker Image (no push)](https://github.com/aleks-maker-maker/my-node-app/actions/runs/44544869191/job/135632825998)
+
+Скачанный ZIP `my-node-app-image` занял **44 804 367 байт**. Его SHA‑256 совпал со значением GitHub `sha256:88ebc378103f67084cd8d12169d8915f5b2023c584eb019901702f8c6be59ecd`. [Артефакт первого запуска](https://github.com/aleks-maker-maker/my-node-app/actions/runs/44544869191/artifacts/14540101290)
+
+Команда `docker load` загрузила образ `my-node-app:test` из TAR. Команда `docker run --rm --network none my-node-app:test` вывела `Hello from Node.js app!` и завершилась с кодом `0`.
+
+### Запуск GitHub Actions
+
+![Первый запуск Node.js CI завершился со статусом Success](screenshots/06-actions-workflow.png)
+
+### Матрица Node.js
+
+![Все варианты Node.js 18.x, 20.x и 22.x прошли проверки](screenshots/07-node-matrix.png)
+
+### Сборка Docker-образа
+
+![Docker-задание собрало образ, создало TAR и загрузило артефакт](screenshots/08-docker-job.png)
+
+### Артефакт в GitHub Actions
+
+![Раздел Artifacts показывает имя, размер и SHA-256 my-node-app-image](screenshots/09-actions-artifact.png)
+
+### Скачивание, восстановление и запуск
+
+![Терминал подтверждает скачивание ZIP, сверку SHA-256, docker load и успешный запуск](screenshots/10-artifact-docker-run.png)
+
+## Как повторить проверку артефакта
+
+1. Войдите в GitHub, выберите успешный запуск после push в `main` и скачайте `my-node-app-image` из раздела **Artifacts**. [Запуски CI for Node.js App](https://github.com/aleks-maker-maker/my-node-app/actions/workflows/ci.yml)
+2. В PowerShell откройте каталог загрузок. Сверьте вычисленный SHA-256 с **Digest** выбранного артефакта.
 
 ~~~powershell
-docker load -i .\my-node-app.tar
-docker run --rm --network none my-node-app:test
+$archive = '.\my-node-app-image.zip'
+Get-FileHash -LiteralPath $archive -Algorithm SHA256
 ~~~
+
+3. Распакуйте проверенный ZIP во временную папку, загрузите TAR и запустите контейнер.
+
+~~~powershell
+$destination = Join-Path ([IO.Path]::GetTempPath()) ('my-node-app-' + [guid]::NewGuid())
+Expand-Archive -LiteralPath $archive -DestinationPath $destination
+docker load -i (Join-Path $destination 'my-node-app.tar')
+docker run --rm --network none my-node-app:test
+$LASTEXITCODE
+~~~
+
+Ожидаемый вывод приложения — `Hello from Node.js app!`, ожидаемый код завершения — `0`.
